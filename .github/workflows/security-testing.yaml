@@ -1,0 +1,115 @@
+name: Common Security Tests
+
+on:
+  workflow_call:
+    inputs:
+      key:
+        required: true
+        type: string
+      restore-keys:
+        required: true
+        type: string
+      event-name:
+        required: true
+        type: string
+
+jobs:
+  secret-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check URL
+        shell: bash
+        env:
+          URL: ${{ secrets.URL_TO_PING }}
+        run: |
+          export URL_RESULTS=$(curl http://$URL)
+          echo "URL_RESULTS=$URL_RESULTS" >> "$GITHUB_ENV"
+      
+      - name: View Results
+        run: |
+          echo "::debug::Set the Octocat variable ${{ env.URL_RESULTS }}"
+    
+  code-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Restore build cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            node_modules
+          key: ${{ inputs.key }}
+          restore-keys: | 
+            ${{ inputs.restore-keys }}
+      
+      - name: Initialize CodeQL Scan
+        uses: github/codeql-action/init@v2  
+        with:
+          languages: javascript
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v2
+
+  dependency-review:
+    if: ${{ inputs.event-name == 'pull_request' }} 
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Restore build cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            node_modules
+          key: ${{ inputs.key }}
+          restore-keys: | 
+            ${{ inputs.restore-keys }}
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v3.0.8
+        with:
+          comment-summary-in-pr: always
+  
+  generate-sbom:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Restore build cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          node_modules
+        key: ${{ inputs.key }}
+        restore-keys: | 
+          ${{ inputs.restore-keys }}
+    
+    - name: Generate SBOM
+      uses: advanced-security/generate-sbom-action@v1
+      id: gensbom
+
+    - name: Upload SBOM artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: sbom
+        path: ${{ steps.gensbom.outputs.fileName }}
